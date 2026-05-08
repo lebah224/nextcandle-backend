@@ -14,4 +14,4 @@ services:
       - key: BINANCE_SYMBOL
         value: BTCUSDT
       - key: MIN_QUALITY
-        value: "5.5"
+        value: "4.0"
