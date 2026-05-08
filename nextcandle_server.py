@@ -64,14 +64,24 @@ logging.basicConfig(
 log = logging.getLogger('NC-Server')
 
 # ═════════════════════════════════════════════════════════════════════
-#  SUPABASE CLIENT
+#  SUPABASE CLIENT — REST direct (fiable sur toutes versions supabase-py)
+#  Raison : supabase-py v2 omet parfois le header apikey → erreur 401
+#  Solution : requests HTTP direct avec headers explicites
 # ═════════════════════════════════════════════════════════════════════
 try:
-    sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    sb = create_client(SUPABASE_URL, SUPABASE_KEY)
     log.info(f'Supabase connecté → {SUPABASE_URL[:40]}…')
 except Exception as e:
     log.error(f'Supabase init failed: {e}')
     sys.exit(1)
+
+# Headers REST directs — garantissent que apikey est toujours envoyé
+SB_HEADERS = {
+    'apikey':        SUPABASE_KEY,
+    'Authorization': f'Bearer {SUPABASE_KEY}',
+    'Content-Type':  'application/json',
+}
+SB_REST = f'{SUPABASE_URL}/rest/v1'
 
 # ═════════════════════════════════════════════════════════════════════
 #  KLINE BUFFER
@@ -355,10 +365,19 @@ def _regime_detect(cd):
 #  SUPABASE — Fonctions d'écriture
 # ═════════════════════════════════════════════════════════════════════
 def _sb_upsert(table, data):
-    try:
-        sb.table(table).upsert(data).execute()
-    except Exception as e:
-        log.warning(f'Supabase upsert {table}: {e}')
+    """Upsert via REST direct — header apikey garanti."""
+    url = f'{SB_REST}/{table}'
+    headers = {**SB_HEADERS, 'Prefer': 'resolution=merge-duplicates,return=minimal'}
+    for attempt in range(2):
+        try:
+            r = requests.post(url, json=data, headers=headers, timeout=10)
+            if r.status_code in (200, 201): return True
+            log.warning(f'Supabase {table}: HTTP {r.status_code} — {r.text[:120]}')
+            return False
+        except Exception as e:
+            if attempt == 0: time.sleep(0.3); continue
+            log.warning(f'Supabase upsert {table}: {e}')
+    return False
 
 def record_setup(setup):
     """Enregistre un setup actif dans Supabase."""
@@ -378,11 +397,15 @@ def record_setup(setup):
     log.info(f'📡 Setup {setup["tf"].upper()} enregistré → Supabase')
 
 def update_setup_state(tf, state):
-    """Met à jour l'état d'un setup."""
+    """Met à jour l'état d'un setup via REST PATCH."""
+    url = f'{SB_REST}/active_setups?tf=eq.{tf}'
+    headers = {**SB_HEADERS, 'Prefer': 'return=minimal'}
     try:
-        sb.table('active_setups').update({
-            'state':state,'updated_at':datetime.now(timezone.utc).isoformat()
-        }).eq('tf',tf).execute()
+        r = requests.patch(url,
+                           json={'state': state, 'updated_at': datetime.now(timezone.utc).isoformat()},
+                           headers=headers, timeout=10)
+        if r.status_code not in (200, 204):
+            log.warning(f'update_setup_state: HTTP {r.status_code} — {r.text[:80]}')
     except Exception as e:
         log.warning(f'update_setup_state: {e}')
 
@@ -422,20 +445,28 @@ def record_oracle_snapshot(closed_tf, close_price):
         tfs_data[tf]={'dir':o_dir,'prob':o_prob,'closePrice':round(cp,2),'outcome':None,'correct':None,'nextClose':None,'pctMove':None}
     if not tfs_data: return
 
-    # Résoudre les anciennes prédictions pour ce TF
+    # Résoudre les anciennes prédictions pour ce TF via REST GET + PATCH
     try:
-        rows=sb.table('oracle_journal').select('id,tfs').order('t',desc=True).limit(20).execute().data
+        url_get = (f'{SB_REST}/oracle_journal'
+                   f'?select=id,tfs&order=t.desc&limit=20')
+        r = requests.get(url_get, headers=SB_HEADERS, timeout=10)
+        rows = r.json() if r.status_code == 200 else []
         for row in rows:
-            d=row.get('tfs',{})
-            if closed_tf in d and d[closed_tf].get('outcome') is None and d[closed_tf].get('closePrice',0)>0:
-                prev_close=d[closed_tf]['closePrice']
-                price_up=close_price>prev_close
-                correct=(d[closed_tf].get('dir',0)>0 and price_up) or (d[closed_tf].get('dir',0)<0 and not price_up)
-                d[closed_tf]['outcome']=1 if price_up else -1
-                d[closed_tf]['correct']=correct
-                d[closed_tf]['nextClose']=round(close_price,2)
-                d[closed_tf]['pctMove']=round((close_price-prev_close)/prev_close*100,3)
-                sb.table('oracle_journal').update({'tfs':d}).eq('id',row['id']).execute()
+            d = row.get('tfs', {})
+            if (closed_tf in d and d[closed_tf].get('outcome') is None
+                    and d[closed_tf].get('closePrice', 0) > 0):
+                prev_close = d[closed_tf]['closePrice']
+                price_up   = close_price > prev_close
+                correct    = ((d[closed_tf].get('dir',0) > 0 and price_up) or
+                              (d[closed_tf].get('dir',0) < 0 and not price_up))
+                d[closed_tf]['outcome']   = 1 if price_up else -1
+                d[closed_tf]['correct']   = bool(correct)
+                d[closed_tf]['nextClose'] = round(close_price, 2)
+                d[closed_tf]['pctMove']   = round((close_price-prev_close)/prev_close*100, 3)
+                url_patch = f'{SB_REST}/oracle_journal?id=eq.{row["id"]}'
+                requests.patch(url_patch, json={'tfs': d},
+                               headers={**SB_HEADERS, 'Prefer': 'return=minimal'},
+                               timeout=10)
                 break
     except Exception as e:
         log.warning(f'Oracle resolve: {e}')
