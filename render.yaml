@@ -1,0 +1,46 @@
+# Render deployment configuration for NextCandle Worker
+# https://render.com/docs/blueprint-spec
+#
+# Service type "web" gives us a public URL (for /health, /metrics, future API),
+# stays alive 24/7 just like a worker, and Render restarts it on crash.
+# A "worker" type would also work but has no public endpoint, which we want
+# for external monitoring (Better Stack, UptimeRobot, etc).
+
+services:
+  - type: web
+    name: nextcandle-worker
+    runtime: node
+    plan: standard       # 1 vCPU, 2 GB RAM — $25/mo
+    region: frankfurt    # closest to Binance EU + Supabase EU
+    branch: main
+    rootDir: .
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/index.js
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=1536
+      - key: PORT
+        value: 10000     # Render web services default port
+      - key: TICK_INTERVAL_MS
+        value: 1000
+      - key: ML_ACTIVE
+        value: true
+      - key: SCORE_MODEL_VERSION
+        value: v4.7
+      - key: LOG_LEVEL
+        value: info
+      # Secrets — to be set in Render dashboard, NOT committed
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
