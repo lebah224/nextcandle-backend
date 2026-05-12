@@ -10,7 +10,7 @@ services:
   - type: web
     name: nextcandle-worker
     runtime: node
-    plan: standard       # 1 vCPU, 2 GB RAM — $25/mo
+    plan: starter        # 0.5 vCPU, 512 MB RAM — $7/mo
     region: frankfurt    # closest to Binance EU + Supabase EU
     branch: main
     rootDir: .
