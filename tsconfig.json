@@ -25,7 +25,7 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitReturns": true,
-   "exactOptionalPropertyTypes": false,
+    "exactOptionalPropertyTypes": false,
 
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
@@ -34,3 +34,5 @@
     "removeComments": false
   },
   "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "tests", "**/*.test.ts"]
+}
