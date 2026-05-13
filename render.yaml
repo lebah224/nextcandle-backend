@@ -10,11 +10,11 @@ services:
   - type: web
     name: nextcandle-worker
     runtime: node
-    plan: standard       # 1 vCPU, 2 GB RAM — $25/mo
+    plan: starter        # 0.5 vCPU, 512 MB RAM — $7/mo
     region: frankfurt    # closest to Binance EU + Supabase EU
     branch: main
     rootDir: .
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build
     startCommand: node dist/index.js
     autoDeploy: true
     healthCheckPath: /health
@@ -22,9 +22,9 @@ services:
       - key: NODE_ENV
         value: production
       - key: NODE_OPTIONS
-        value: --max-old-space-size=1536
+        value: --max-old-space-size=384
       - key: PORT
-        value: 10000     # Render web services default port
+        value: 10000
       - key: TICK_INTERVAL_MS
         value: 1000
       - key: ML_ACTIVE
@@ -33,7 +33,6 @@ services:
         value: v4.7
       - key: LOG_LEVEL
         value: info
-      # Secrets — to be set in Render dashboard, NOT committed
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
